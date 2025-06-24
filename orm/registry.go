@@ -1,6 +1,7 @@
 package orm
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -29,8 +30,11 @@ func ParseOrGetMeta(model Model) (*MapRelationMeta, error) {
 			continue
 		}
 
+		fieldType := field.Type
+		fieldTypeElem := fieldType.Elem()
+
 		// only for pointer of struct or slice of struct
-		if (field.Type.Kind() != reflect.Pointer && field.Type.Kind() != reflect.Slice) || (field.Type.Elem().Kind() != reflect.Struct) {
+		if (fieldType.Kind() != reflect.Pointer && fieldType.Kind() != reflect.Slice) || (fieldTypeElem.Kind() != reflect.Struct) {
 			continue
 		}
 
@@ -39,9 +43,9 @@ func ParseOrGetMeta(model Model) (*MapRelationMeta, error) {
 		subRes.MainTable = model.TableName()
 		subRes.MainType = modelType
 
-		if iface, ok := reflect.New(field.Type.Elem()).Elem().Addr().Interface().(Model); ok {
+		if iface, ok := reflect.New(fieldTypeElem).Interface().(Model); ok {
 			subRes.AssocTable = iface.TableName()
-			subRes.AssocType = field.Type.Elem()
+			subRes.AssocType = fieldTypeElem
 		}
 
 		parts := strings.SplitSeq(ormTag, ";")
@@ -65,24 +69,56 @@ func ParseOrGetMeta(model Model) (*MapRelationMeta, error) {
 			}
 		}
 
-		subRes.GetMainField = func(m Model) any {
-			v := reflect.ValueOf(m).Elem()
+		{
+			mainStructField, ok := subRes.MainType.FieldByName(subRes.MainField)
+			if !ok {
+				return nil, fmt.Errorf("orm: mainField '%s' specified in tag for %s.%s does not exist in model %s", subRes.MainField, modelType.Name(), field.Name, subRes.MainType.Name())
+			}
+			subRes.MainFieldIndex = mainStructField.Index
 
-			return v.FieldByName(subRes.MainField).Interface()
+			assocStructField, ok := subRes.AssocType.FieldByName(subRes.AssocField)
+			if !ok {
+				return nil, fmt.Errorf("orm: assocField '%s' specified in tag for %s.%s does not exist in model %s", subRes.AssocField, modelType.Name(), field.Name, subRes.AssocType.Name())
+			}
+			subRes.AssocFieldIndex = assocStructField.Index
+
+			subRes.GetMainField = func(m Model) any {
+				v := reflect.ValueOf(m).Elem()
+				f := v.FieldByIndex(subRes.MainFieldIndex)
+
+				if f.IsZero() {
+					return nil
+				}
+
+				if f.Kind() == reflect.Pointer {
+					f = f.Elem()
+				}
+
+				return f.Interface()
+			}
+
+			subRes.GetAssocField = func(v reflect.Value) any {
+				f := v.FieldByIndex(subRes.AssocFieldIndex)
+
+				if f.IsZero() {
+					return nil
+				}
+
+				if f.Kind() == reflect.Pointer {
+					f = f.Elem()
+				}
+
+				return f.Interface()
+			}
 		}
 
-		subRes.GetAssocField = func(v reflect.Value) any {
-			return v.FieldByName(subRes.AssocField).Interface()
-		}
-
-		subRes.Attach = func(primary, foreign reflect.Value) {
-			field := primary.Field(i)
-
+		subRes.Attach = func(mainModelValue, assocModelValue reflect.Value) {
+			field := mainModelValue.Field(i)
 			if field.CanSet() {
 				if field.Kind() == reflect.Slice {
-					field.Set(reflect.Append(field, foreign))
-				} else {
-					field.Set(foreign.Addr())
+					field.Set(reflect.Append(field, assocModelValue))
+				} else if field.Kind() == reflect.Ptr {
+					field.Set(assocModelValue.Addr())
 				}
 			}
 		}

@@ -21,8 +21,9 @@ func main() {
 
 	setupSchema(db)
 
-	dump.Println(orm.Select[*model.Post](context.TODO(), db))
-	dump.Println(orm.Select[*model.User](context.TODO(), db))
-	// dump.Println(orm.Get[*model.User](context.TODO(), db, 1))
+	dump.Println(orm.Select[model.Post](context.TODO(), db))
+	dump.Println(orm.Select[model.User](context.TODO(), db))
+	dump.Println(orm.Get[model.User](context.TODO(), db, 1))
+	dump.Println(orm.Get[model.User](context.TODO(), db, 2))
 
 }
