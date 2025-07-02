@@ -29,7 +29,7 @@ func Select[T any](ctx context.Context, db *sql.DB) ([]T, error) {
 		return results, nil
 	}
 
-	err = parseMeta(ctx, db, results...)
+	err = preload(ctx, db, results...)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +52,7 @@ func Get[T any](ctx context.Context, db *sql.DB, id int) (*T, error) {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
 
-	err = parseMeta(ctx, db, tmp...)
+	err = preload(ctx, db, tmp...)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,48 @@ func Get[T any](ctx context.Context, db *sql.DB, id int) (*T, error) {
 	return &result, nil
 }
 
-func parseMeta[T any](ctx context.Context, db *sql.DB, results ...T) error {
+func Create[T any](ctx context.Context, db *sql.DB, model T) error {
+	modelInstance := any(new(T)).(Model)
+
+	query := "INSERT INTO " + modelInstance.TableName() + " ("
+	args := make([]string, 0)
+	values := make([]any, 0)
+
+	meta, err := ParseOrGetMeta(modelInstance)
+	if err != nil {
+		return fmt.Errorf("failed to parse metadata for %s: %w", modelInstance.TableName(), err)
+	}
+
+	if meta == nil {
+		fmt.Println("nil meta")
+		return nil
+	}
+
+	for _, field := range *meta.FieldMetas {
+		value := field.GetField(any(&model).(Model))
+		if value == nil {
+			continue
+		}
+
+		query += field.DatabaseName + ","
+		args = append(args, "?")
+		values = append(values, value)
+	}
+
+	query = strings.TrimSuffix(query, ",") + ") VALUES (" + strings.Join(args, ",") + ")"
+
+	dump.Println(query)
+	dump.Println(values)
+
+	_, err = db.ExecContext(ctx, query, values...)
+	if err != nil {
+		return fmt.Errorf("query failed: %w", err)
+	}
+
+	return nil
+}
+
+func preload[T any](ctx context.Context, db *sql.DB, results ...T) error {
 	modelInstance := any(new(T)).(Model)
 
 	meta, err := ParseOrGetMeta(modelInstance)
@@ -70,12 +111,12 @@ func parseMeta[T any](ctx context.Context, db *sql.DB, results ...T) error {
 		return fmt.Errorf("failed to parse metadata for %s: %w", modelInstance.TableName(), err)
 	}
 
-	if meta == nil || len(*meta) == 0 {
+	if meta == nil {
 		fmt.Println("nil meta")
 		return nil
 	}
 
-	for _, rel := range *meta {
+	for _, rel := range *meta.RelationMetas {
 		mainIDs := make([]string, 0)
 		mapMainField := make(map[any][]*T, 0)
 
