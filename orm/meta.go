@@ -3,10 +3,11 @@ package orm
 import "reflect"
 
 type ModelMeta struct {
-	TableName     string
-	ModelType     reflect.Type
-	RelationMetas *MapRelationMeta
-	FieldMetas    *MapFieldMeta
+	ModelType        reflect.Type
+	TableName        string
+	PrimaryFieldMeta *FieldMeta
+	RelationMetas    *MapRelationMeta
+	FieldMetas       *MapFieldMeta
 }
 
 type RelationMeta struct {
@@ -30,6 +31,7 @@ type FieldMeta struct {
 	GetField     func(Model) any
 	DatabaseName string
 	DatabaseType string
+	KeyType      *string
 }
 
 type MapFieldMeta = map[string]*FieldMeta

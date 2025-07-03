@@ -80,6 +80,7 @@ func Create[T any](ctx context.Context, db *sql.DB, model T) error {
 	}
 
 	for _, field := range *meta.FieldMetas {
+		dump.Println(field)
 		value := field.GetField(any(&model).(Model))
 		if value == nil {
 			continue
@@ -91,6 +92,50 @@ func Create[T any](ctx context.Context, db *sql.DB, model T) error {
 	}
 
 	query = strings.TrimSuffix(query, ",") + ") VALUES (" + strings.Join(args, ",") + ")"
+
+	dump.Println(query)
+	dump.Println(values)
+
+	_, err = db.ExecContext(ctx, query, values...)
+	if err != nil {
+		return fmt.Errorf("query failed: %w", err)
+	}
+
+	return nil
+}
+
+func Update[T any](ctx context.Context, db *sql.DB, model T) error {
+	modelInstance := any(new(T)).(Model)
+
+	query := "UPDATE " + modelInstance.TableName() + " SET "
+	values := make([]any, 0)
+
+	meta, err := ParseOrGetMeta(modelInstance)
+	if err != nil {
+		return fmt.Errorf("failed to parse metadata for %s: %w", modelInstance.TableName(), err)
+	}
+
+	if meta == nil {
+		fmt.Println("nil meta")
+		return nil
+	}
+
+	for _, field := range *meta.FieldMetas {
+		if field.KeyType != nil && *field.KeyType == "primary" {
+			continue
+		}
+
+		value := field.GetField(any(&model).(Model))
+		if value == nil {
+			continue
+		}
+
+		query += fmt.Sprintf("%s = ?,", field.DatabaseName)
+		values = append(values, value)
+	}
+
+	query = strings.TrimSuffix(query, ",") + " WHERE id = ?"
+	values = append(values, meta.PrimaryFieldMeta.GetField(any(&model).(Model)))
 
 	dump.Println(query)
 	dump.Println(values)
@@ -123,8 +168,15 @@ func preload[T any](ctx context.Context, db *sql.DB, results ...T) error {
 		for i := range results {
 			if key := rel.GetMainField(any(&results[i]).(Model)); key != nil {
 				mapMainField[key] = append(mapMainField[key], &results[i])
-				mainIDs = append(mainIDs, fmt.Sprintf("%v", key))
+
+				if len(mapMainField[key]) == 1 {
+					mainIDs = append(mainIDs, fmt.Sprintf("%v", key))
+				}
 			}
+		}
+
+		if len(mainIDs) == 0 {
+			continue
 		}
 
 		resultRel := reflect.New(reflect.SliceOf(rel.AssocType))

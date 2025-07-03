@@ -23,8 +23,8 @@ func ParseOrGetMeta(model Model) (*ModelMeta, error) {
 	}
 
 	res := ModelMeta{
-		TableName:     model.TableName(),
 		ModelType:     modelType,
+		TableName:     model.TableName(),
 		FieldMetas:    &MapFieldMeta{},
 		RelationMetas: &MapRelationMeta{},
 	}
@@ -38,6 +38,10 @@ func ParseOrGetMeta(model Model) (*ModelMeta, error) {
 
 		if subRes, _ := ParseFieldMeta(modelType, field, i); subRes != nil {
 			(*res.FieldMetas)[field.Name] = subRes
+
+			if subRes.KeyType != nil && *subRes.KeyType == "primary" {
+				res.PrimaryFieldMeta = subRes
+			}
 		}
 
 	}
@@ -54,14 +58,15 @@ func ParseRelationMeta(modelType reflect.Type, field reflect.StructField, fieldI
 	}
 
 	fieldType := field.Type
-	fieldTypeElem := fieldType.Elem()
 
 	// only for pointer of struct or slice of struct
-	if (fieldType.Kind() != reflect.Pointer && fieldType.Kind() != reflect.Slice) || (fieldTypeElem.Kind() != reflect.Struct) {
+	if (fieldType.Kind() != reflect.Pointer && fieldType.Kind() != reflect.Slice) || (fieldType.Elem().Kind() != reflect.Struct) {
 		return nil, nil
 	}
 
 	res := RelationMeta{}
+
+	fieldTypeElem := fieldType.Elem()
 
 	if iface, ok := reflect.New(fieldTypeElem).Interface().(Model); ok {
 		res.AssocTable = iface.TableName()
@@ -157,7 +162,11 @@ func ParseFieldMeta(modelType reflect.Type, field reflect.StructField, fieldIdx 
 
 	res := FieldMeta{}
 
-	if ormTag := field.Tag.Get("orm"); ormTag != "" && ormTag != "-" {
+	if ormTag := field.Tag.Get("orm"); ormTag != "" {
+		if ormTag == "-" {
+			return nil, nil
+		}
+
 		parts := strings.SplitSeq(ormTag, ";")
 
 		for j := range parts {
@@ -170,6 +179,8 @@ func ParseFieldMeta(modelType reflect.Type, field reflect.StructField, fieldIdx 
 			key, val := subParts[0], subParts[1]
 
 			switch key {
+			case "key":
+				res.KeyType = &val
 			case "column":
 				res.DatabaseName = val
 			case "type":
@@ -179,7 +190,15 @@ func ParseFieldMeta(modelType reflect.Type, field reflect.StructField, fieldIdx 
 	}
 
 	res.FieldName = field.Name
-	res.FieldType = field.Type.Name()
+
+	switch fieldType.Kind() {
+	case reflect.Struct:
+		res.FieldType = fieldType.Name()
+	case reflect.Pointer:
+		res.FieldType = fieldType.Elem().Name()
+	default:
+		res.FieldType = fieldType.String()
+	}
 
 	if res.DatabaseName == "" {
 		res.DatabaseName = strcase.ToSnake(res.FieldName)

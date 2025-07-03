@@ -1,9 +1,9 @@
 package model
 
 type Post struct {
-	ID     int    `db:"id"`
+	ID     int    `db:"id" orm:"key:primary"`
 	Title  string `db:"title"`
-	UserID int    `db:"user_id"`
+	UserID int    `db:"user_id" orm:"key:foreign"`
 	User   *User  `db:"-" orm:"relation:BelongsTo;mainField:UserID;assocField:ID"`
 }
 
